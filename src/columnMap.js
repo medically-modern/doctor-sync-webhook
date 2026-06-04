@@ -36,6 +36,8 @@ const DOCTOR_COLUMN_IDS = [
 const SOURCE_NPI_COL = "text_mm1x7d91";
 // The Doctor Name column on source boards (used for safety check)
 const SOURCE_NAME_COL = "text_mm1x46et";
+// The Doctor Phone column on source boards (used for NPI-change matching)
+const SOURCE_PHONE_COL = "phone_mm1xz8c0";
 
 /**
  * Maps a source board column ID → the corresponding Doctor Database column ID
@@ -136,5 +138,6 @@ module.exports = {
   DOCTOR_COLUMN_IDS,
   SOURCE_NPI_COL,
   SOURCE_NAME_COL,
+  SOURCE_PHONE_COL,
   mapSourceToDb,
 };

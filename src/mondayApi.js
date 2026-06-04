@@ -88,18 +88,18 @@ async function findDoctorByNPI(npi) {
 
 
 /**
- * Search the Doctor Database board for a doctor by name (exact match).
+ * Search the Doctor Database board for doctors by name (exact match).
  * Used when the NPI column itself is changed — we can't look up by NPI
  * because the DB may still have the old/wrong one.
- * Returns the first matching item or null.
+ * Returns ALL matching items (array), since multiple doctors can share a name.
  */
-async function findDoctorByName(name) {
+async function findDoctorsByName(name) {
   const DB_BOARD_ID = "18142847597";
 
   // Use items_page_by_column_values on the "name" column
   const data = await mondayQuery(
     `query ($boardId: ID!, $columns: [ItemsPageByColumnValuesQuery!]!) {
-      items_page_by_column_values(board_id: $boardId, limit: 5, columns: $columns) {
+      items_page_by_column_values(board_id: $boardId, limit: 20, columns: $columns) {
         items {
           id
           name
@@ -118,8 +118,7 @@ async function findDoctorByName(name) {
     }
   );
 
-  const items = data.items_page_by_column_values?.items || [];
-  return items.length > 0 ? items[0] : null;
+  return data.items_page_by_column_values?.items || [];
 }
 
 /**
@@ -172,7 +171,7 @@ module.exports = {
   mondayQuery,
   getItemColumns,
   findDoctorByNPI,
-  findDoctorByName,
+  findDoctorsByName,
   updateDoctorColumn,
   updateDoctorName,
 };

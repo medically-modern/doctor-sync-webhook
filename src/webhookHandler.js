@@ -1,7 +1,7 @@
 const {
   getItemColumns,
   findDoctorByNPI,
-  findDoctorByName,
+  findDoctorsByName,
   updateDoctorColumn,
   updateDoctorName,
   mondayQuery,
@@ -12,6 +12,7 @@ const {
   DOCTOR_COLUMN_IDS,
   SOURCE_NPI_COL,
   SOURCE_NAME_COL,
+  SOURCE_PHONE_COL,
   mapSourceToDb,
   DB_BOARD_ID,
 } = require("./columnMap");
@@ -65,7 +66,7 @@ async function handleWebhook(body) {
 
   // ── SPECIAL CASE: NPI column changed ──
   // When someone corrects the NPI, we can't look up by NPI (the DB still has the old one).
-  // Instead, look up by doctor name and update the NPI in the DB.
+  // Instead, look up by doctor name + phone number to find the exact match, then update the NPI.
   if (columnId === SOURCE_NPI_COL) {
     if (!npi) {
       console.log(`[SKIP] NPI was cleared — nothing to sync`);
@@ -76,15 +77,42 @@ async function handleWebhook(body) {
       return;
     }
 
-    console.log(`[NPI-CHANGE] Looking up doctor by name: "${sourceDoctorName}"`);
-    const dbDoctor = await findDoctorByName(sourceDoctorName);
+    // Extract phone from the source item for secondary matching
+    const phoneCol = sourceItem.column_values.find((cv) => cv.id === SOURCE_PHONE_COL);
+    const sourcePhone = extractPhoneDigits(phoneCol?.text);
 
-    if (!dbDoctor) {
+    if (!sourcePhone) {
+      console.log(`[SKIP] No phone number on source item — need name + phone to match for NPI update`);
+      return;
+    }
+
+    console.log(`[NPI-CHANGE] Looking up doctor by name: "${sourceDoctorName}" phone: ${sourcePhone}`);
+    const dbDoctors = await findDoctorsByName(sourceDoctorName);
+
+    if (dbDoctors.length === 0) {
       console.log(`[NOT FOUND] No doctor in DB with name "${sourceDoctorName}" — cannot update NPI`);
       return;
     }
 
-    console.log(`[FOUND] DB Doctor: "${dbDoctor.name}" (id: ${dbDoctor.id})`);
+    // Find the one whose phone matches
+    const dbDoctor = dbDoctors.find((doc) => {
+      const dbPhoneCol = doc.column_values.find((cv) => cv.id === "phone");
+      const dbPhone = extractPhoneDigits(dbPhoneCol?.text);
+      return dbPhone === sourcePhone;
+    });
+
+    if (!dbDoctor) {
+      const dbPhones = dbDoctors.map((d) => {
+        const p = d.column_values.find((cv) => cv.id === "phone");
+        return `"${d.name}" phone=${p?.text || "empty"}`;
+      });
+      console.log(
+        `[NO PHONE MATCH] Found ${dbDoctors.length} doctor(s) named "${sourceDoctorName}" but none matched phone ${sourcePhone}: ${dbPhones.join(", ")}`
+      );
+      return;
+    }
+
+    console.log(`[FOUND] DB Doctor: "${dbDoctor.name}" (id: ${dbDoctor.id}) — name + phone matched`);
 
     try {
       const npiValue = JSON.stringify(npi);
@@ -219,6 +247,15 @@ async function handleDropdownUpdate(dbItemId, dbColumnId, sourceCol) {
   console.log(`[UPDATE] Setting dropdown ${dbColumnId} to label id=${matchingLabel.id} ("${matchingLabel.name}")`);
   await updateDoctorColumn(dbItemId, dbColumnId, value);
   console.log(`[SUCCESS] Dropdown updated`);
+}
+
+/**
+ * Extract just the digits from a phone string for comparison.
+ * "570-887-3131" → "5708873131", "(570) 887-3131" → "5708873131"
+ */
+function extractPhoneDigits(phoneStr) {
+  if (!phoneStr) return "";
+  return phoneStr.replace(/\D/g, "");
 }
 
 /**
