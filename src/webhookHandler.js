@@ -1,6 +1,7 @@
 const {
   getItemColumns,
   findDoctorByNPI,
+  findDoctorByName,
   updateDoctorColumn,
   updateDoctorName,
   mondayQuery,
@@ -58,14 +59,49 @@ async function handleWebhook(body) {
   const npiCol = sourceItem.column_values.find((cv) => cv.id === SOURCE_NPI_COL);
   const npi = npiCol?.text?.trim();
 
+  // Extract Doctor Name from the source item
+  const nameCol = sourceItem.column_values.find((cv) => cv.id === SOURCE_NAME_COL);
+  const sourceDoctorName = nameCol?.text?.trim() || "";
+
+  // ── SPECIAL CASE: NPI column changed ──
+  // When someone corrects the NPI, we can't look up by NPI (the DB still has the old one).
+  // Instead, look up by doctor name and update the NPI in the DB.
+  if (columnId === SOURCE_NPI_COL) {
+    if (!npi) {
+      console.log(`[SKIP] NPI was cleared — nothing to sync`);
+      return;
+    }
+    if (!sourceDoctorName) {
+      console.log(`[SKIP] No doctor name on source item — cannot look up by name`);
+      return;
+    }
+
+    console.log(`[NPI-CHANGE] Looking up doctor by name: "${sourceDoctorName}"`);
+    const dbDoctor = await findDoctorByName(sourceDoctorName);
+
+    if (!dbDoctor) {
+      console.log(`[NOT FOUND] No doctor in DB with name "${sourceDoctorName}" — cannot update NPI`);
+      return;
+    }
+
+    console.log(`[FOUND] DB Doctor: "${dbDoctor.name}" (id: ${dbDoctor.id})`);
+
+    try {
+      const npiValue = JSON.stringify(npi);
+      console.log(`[UPDATE] Setting NPI to ${npi} for DB doctor "${dbDoctor.name}"`);
+      await updateDoctorColumn(dbDoctor.id, "text_mkwhtqjb", npiValue);
+      console.log(`[SUCCESS] NPI updated for doctor "${dbDoctor.name}"`);
+    } catch (err) {
+      console.error(`[ERROR] Failed to update NPI for doctor ${dbDoctor.id}:`, err.message);
+    }
+    return;
+  }
+
+  // ── STANDARD FLOW: non-NPI column changed ──
   if (!npi) {
     console.log(`[SKIP] Item ${itemId} has no NPI value — cannot look up doctor`);
     return;
   }
-
-  // Extract Doctor Name from the source item
-  const nameCol = sourceItem.column_values.find((cv) => cv.id === SOURCE_NAME_COL);
-  const sourceDoctorName = nameCol?.text?.trim() || "";
 
   console.log(`[LOOKUP] NPI=${npi} DoctorName="${sourceDoctorName}"`);
 

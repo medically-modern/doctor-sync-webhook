@@ -86,6 +86,42 @@ async function findDoctorByNPI(npi) {
   return items.length > 0 ? items[0] : null;
 }
 
+
+/**
+ * Search the Doctor Database board for a doctor by name (exact match).
+ * Used when the NPI column itself is changed — we can't look up by NPI
+ * because the DB may still have the old/wrong one.
+ * Returns the first matching item or null.
+ */
+async function findDoctorByName(name) {
+  const DB_BOARD_ID = "18142847597";
+
+  // Use items_page_by_column_values on the "name" column
+  const data = await mondayQuery(
+    `query ($boardId: ID!, $columns: [ItemsPageByColumnValuesQuery!]!) {
+      items_page_by_column_values(board_id: $boardId, limit: 5, columns: $columns) {
+        items {
+          id
+          name
+          column_values {
+            id
+            type
+            text
+            value
+          }
+        }
+      }
+    }`,
+    {
+      boardId: DB_BOARD_ID,
+      columns: [{ column_id: "name", column_values: [String(name)] }],
+    }
+  );
+
+  const items = data.items_page_by_column_values?.items || [];
+  return items.length > 0 ? items[0] : null;
+}
+
 /**
  * Update a single column value on an item in the Doctor Database
  */
@@ -136,6 +172,7 @@ module.exports = {
   mondayQuery,
   getItemColumns,
   findDoctorByNPI,
+  findDoctorByName,
   updateDoctorColumn,
   updateDoctorName,
 };
