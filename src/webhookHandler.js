@@ -248,9 +248,12 @@ async function handleDropdownUpdate(dbItemId, dbColumnId, sourceCol) {
   );
 
   if (!matchingLabel) {
-    console.log(
-      `[DROPDOWN] Label "${sourceText}" not found in DB dropdown — available: ${labels.map((l) => l.name).join(", ")}`
-    );
+    // Label doesn't exist in the DB dropdown — create it and set it in one call.
+    // Using a JSON {"labels":[...]} value preserves commas inside label names.
+    console.log(`[DROPDOWN] Label "${sourceText}" not in DB dropdown — auto-creating`);
+    const createValue = JSON.stringify({ labels: [sourceText] });
+    await updateDoctorColumn(dbItemId, dbColumnId, createValue, true);
+    console.log(`[SUCCESS] Dropdown label "${sourceText}" created and set`);
     return;
   }
 

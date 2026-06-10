@@ -124,12 +124,12 @@ async function findDoctorsByName(name) {
 /**
  * Update a single column value on an item in the Doctor Database
  */
-async function updateDoctorColumn(itemId, columnId, value) {
+async function updateDoctorColumn(itemId, columnId, value, createLabelsIfMissing = false) {
   const DB_BOARD_ID = "18142847597";
 
   const data = await mondayQuery(
-    `mutation ($boardId: ID!, $itemId: ID!, $columnId: String!, $value: JSON!) {
-      change_column_value(board_id: $boardId, item_id: $itemId, column_id: $columnId, value: $value) {
+    `mutation ($boardId: ID!, $itemId: ID!, $columnId: String!, $value: JSON!, $createLabels: Boolean) {
+      change_column_value(board_id: $boardId, item_id: $itemId, column_id: $columnId, value: $value, create_labels_if_missing: $createLabels) {
         id
       }
     }`,
@@ -138,6 +138,7 @@ async function updateDoctorColumn(itemId, columnId, value) {
       itemId: String(itemId),
       columnId,
       value,
+      createLabels: createLabelsIfMissing,
     }
   );
 
