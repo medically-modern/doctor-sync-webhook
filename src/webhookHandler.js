@@ -269,7 +269,13 @@ async function handleDropdownUpdate(dbItemId, dbColumnId, sourceCol) {
  */
 function extractPhoneDigits(phoneStr) {
   if (!phoneStr) return "";
-  return phoneStr.replace(/\D/g, "");
+  let digits = phoneStr.replace(/\D/g, "");
+  // Normalize US numbers: drop leading country code "1" (11 digits → 10)
+  // so "+1 212-263-9910" matches "212-263-9910"
+  if (digits.length === 11 && digits.startsWith("1")) {
+    digits = digits.slice(1);
+  }
+  return digits;
 }
 
 /**
