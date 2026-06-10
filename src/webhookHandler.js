@@ -176,6 +176,17 @@ async function handleWebhook(body) {
     } else if (mapping.isDropdown) {
       // Dropdown: match by label text
       await handleDropdownUpdate(dbDoctor.id, mapping.dbColumnId, changedCol);
+    } else if (mapping.isStatus) {
+      // Status: sync by label text — index mappings differ between boards
+      const label = changedCol?.text?.trim();
+      if (!label) {
+        console.log(`[SKIP] Status value is empty for column ${columnId}`);
+        return;
+      }
+      const value = JSON.stringify({ label });
+      console.log(`[UPDATE] Setting status ${mapping.dbColumnId} to label "${label}"`);
+      await updateDoctorColumn(dbDoctor.id, mapping.dbColumnId, value);
+      console.log(`[SUCCESS] Status ${mapping.dbColumnId} set to "${label}" for doctor "${dbDoctorName}"`);
     } else {
       // Standard column update
       const newValue = mapping.transformValue

@@ -72,19 +72,12 @@ function mapSourceToDb(sourceColumnId) {
       },
     },
     // Clinicals Method → MN Exchange? (status → status)
+    // IMPORTANT: the two boards have DIFFERENT index→label mappings
+    // (source: 0=Fax, 1=Parachute, 2=Email; DB: 0=Parachute, 1=Fax, 2=Email),
+    // so we must sync by label text, never by raw index.
     color_mm1xw7y5: {
       dbColumnId: "color_mm1vr8rd",
-      transformValue: (sourceValue) => {
-        // Status columns: need to map the label text to the DB status index
-        // Source labels: Parachute, Fax, Email
-        // DB labels for color_mm1vr8rd: index 0 = "Parachute", index 1 = "Fax", index 2 = "Email"
-        // We pass the label text and let Monday resolve it
-        if (!sourceValue) return null;
-        const parsed = typeof sourceValue === "string" ? JSON.parse(sourceValue) : sourceValue;
-        // Use the index approach — need to map source index → DB index
-        // Safer: read the label from source, write label to DB
-        return sourceValue; // Status columns with same labels can pass index directly
-      },
+      isStatus: true,
     },
     // Doctor Email → Script Email
     email_mm1x6fq5: {
