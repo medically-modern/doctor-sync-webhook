@@ -13,6 +13,18 @@ then syncs the changed field to the MM Doctor Database.
 ## Environment Variables
 - `MONDAY_API_TOKEN` — Monday.com API token (required)
 - `PORT` — Server port (auto-set by Railway)
+- `FRIDAY_FORWARD`, `FRIDAY_URL`, `FRIDAY_API_KEY`, `FRIDAY_BOARD_IDS` — the Friday forward (below); off unless `FRIDAY_FORWARD=1`
+- `NTFY_URL`, `NTFY_TOPIC` — optional: where the forward pushes an alert when it gives up on a write
+
+## The Friday forward
+Friday (Medically Modern's own board app, `medically-modern/friday`) keeps a copy of the MM Doctor Database
+(18142847597) and is handed every write this service makes there. `src/fridayForward.js` is the same CommonJS
+module josh-monday-automations and auto-doctor-database-search carry: `mondayQuery` hands it each mutation Monday
+accepted (no `errors`, data in the answer), after Monday's answer, and it posts the write exactly as sent to Friday's
+`POST /v1/monday/write` from an in-memory queue drained in order. It never throws and never delays Monday's answer;
+a restart loses what was queued (Friday's hourly check and sync from Monday are the net). Only a write naming a board
+in `FRIDAY_BOARD_IDS` is sent (`18142847597`). `GET /` shows it under `friday`. Keep `mondayQuery` the only Monday
+call: `test/fridayForward.test.js` fails on another.
 
 ## Deploy to Railway
 1. Connect this repo to Railway

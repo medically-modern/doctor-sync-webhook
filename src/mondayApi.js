@@ -1,5 +1,12 @@
 const MONDAY_API_URL = "https://api.monday.com/v2";
 const MONDAY_TOKEN = process.env.MONDAY_API_TOKEN;
+const { createFridayForward } = require("./fridayForward");
+
+// The Friday forward (fridayForward.js): every mutation Monday accepts through mondayQuery below is
+// handed to Friday afterwards, exactly as sent, so Friday's copy of the Doctor Database gets the same
+// writes. It runs after Monday's answer, on a timer, and can never fail or delay a Monday call. Off
+// unless FRIDAY_FORWARD=1 (with FRIDAY_URL and FRIDAY_API_KEY); FRIDAY_BOARD_IDS names the boards.
+const fridayForward = createFridayForward({ env: process.env, log: console.log, service: "doctor-sync-webhook" });
 
 if (!MONDAY_TOKEN) {
   console.warn("[WARN] MONDAY_API_TOKEN not set — API calls will fail");
@@ -25,6 +32,7 @@ async function mondayQuery(query, variables = {}) {
     throw new Error(`Monday API error: ${msg}`);
   }
 
+  if (res.ok && data.data) fridayForward.onMutation({ query, variables, data: data.data });   // Monday said yes: Friday hears the same write
   return data.data;
 }
 
@@ -169,6 +177,7 @@ async function updateDoctorName(itemId, newName) {
 }
 
 module.exports = {
+  fridayForward,
   mondayQuery,
   getItemColumns,
   findDoctorByNPI,

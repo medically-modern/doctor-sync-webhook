@@ -1,5 +1,6 @@
 const express = require("express");
 const { handleWebhook } = require("./webhookHandler");
+const { fridayForward } = require("./mondayApi");
 
 const app = express();
 app.use(express.json());
@@ -8,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 
 // Health check
 app.get("/", (req, res) => {
-  res.json({ status: "ok", service: "doctor-sync-webhook", timestamp: new Date().toISOString() });
+  res.json({ status: "ok", service: "doctor-sync-webhook", timestamp: new Date().toISOString(), friday: fridayForward.status() });
 });
 
 // Monday.com webhook endpoint
