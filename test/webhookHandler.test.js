@@ -17,6 +17,9 @@ const mondayApi = {
   async findDoctorByNPI(npi) {
     return directory.find((d) => d.column_values.some((c) => c.id === "text_mkwhtqjb" && c.text === String(npi))) || null;
   },
+  async findDoctorsByNPI(npi) {
+    return directory.filter((d) => d.column_values.some((c) => c.id === "text_mkwhtqjb" && c.text === String(npi)));
+  },
   async findDoctorsByName(name) { return directory.filter((d) => d.name === String(name)); },
   async updateDoctorColumn(itemId, columnId, value, createLabelsIfMissing = false) {
     writes.push({ itemId: String(itemId), columnId, value, createLabelsIfMissing });
@@ -45,10 +48,14 @@ function sourceItem(cols) {
     column_values: Object.entries(cols).map(([id, v]) => ({ id, text: v.text ?? "", value: v.value ?? null }))
   });
 }
-function directoryEntry(id, name, { npi = "", phone = "" } = {}) {
+function directoryEntry(id, name, { npi = "", phone = "", address = "", clinic = "", fax = "" } = {}) {
   return {
     id, name,
-    column_values: [{ id: "text_mkwhtqjb", text: npi, value: npi ? JSON.stringify(npi) : null }, { id: "phone", text: phone, value: null }]
+    column_values: [
+      { id: "text_mkwhtqjb", text: npi, value: npi ? JSON.stringify(npi) : null }, { id: "phone", text: phone, value: null },
+      { id: "text_mkzc21ns", text: address, value: null }, { id: "dropdown_mm1vd9fs", text: clinic, value: null },
+      { id: "email_mkwh2ywd", text: fax, value: null }
+    ]
   };
 }
 const edit = (columnId, boardId = MED_EVAL) => handleWebhook({ event: { boardId, pulseId: Number(SOURCE_ID), columnId } });
@@ -164,4 +171,86 @@ test("Profile Send Off, Medical Evaluation, Insurance and Welcome Call edits are
   sourceItem({ [COL.npi]: { text: "1000000014" }, [COL.name]: { text: "Alex Placeholder" }, [COL.method]: { text: "Email" } });
   for (const board of [18406352652, 18406060017, 18410601299, 18410804557]) await edit(COL.method, board);
   assert.equal(writes.length, 4);
+});
+
+const faxValue = (f) => ({ text: f, value: JSON.stringify({ email: f, text: f }) });
+
+test("an edit is copied when the names differ only by credentials, a suffix or Last, First", async () => {
+  for (const [db, patient] of [["Allyson Quinn", "Allyson Quinn, PA-C"], ["Destiny Spaights", "Destiny Spaights PA-C"],
+    ["Linxia Dong", "Linxia Dong, FNP-BC"], ["Anh Do", "Anh Do, MD"], ["Quinn, Allyson", "Dr. Allyson Quinn MD"],
+    ["Cara Cahill", "Cara Lynn Cahill, NP"], ["Katherine Beckwith", "Katherine A. Beckwith"], ["Anne Derosairo", "ANNE DE ROSAIRO"]]) {
+    directory = [directoryEntry("520", db, { npi: "1000000020" })];
+    writes.length = 0;
+    sourceItem({ [COL.npi]: { text: "1000000020" }, [COL.name]: { text: patient }, [COL.fax]: faxValue("2125550120@rcfax.com") });
+    await edit(COL.fax);
+    assert.equal(writes.length, 1, `${patient} should match ${db}`);
+  }
+});
+
+test("a credential never stands in for a surname, and a different person still does not match", async () => {
+  directory = [directoryEntry("521", "Anh", { npi: "1000000021" })];
+  sourceItem({ [COL.npi]: { text: "1000000021" }, [COL.name]: { text: "Anh Do" }, [COL.fax]: faxValue("2125550121@rcfax.com") });
+  await edit(COL.fax);
+  directory = [directoryEntry("522", "Brahma Natarajan", { npi: "1000000022" })];
+  sourceItem({ [COL.npi]: { text: "1000000022" }, [COL.name]: { text: "Dr. Ballandares" }, [COL.fax]: faxValue("2125550122@rcfax.com") });
+  await edit(COL.fax);
+  directory = [directoryEntry("523", "Catherine Morris", { npi: "1000000023" })];
+  sourceItem({ [COL.npi]: { text: "1000000023" }, [COL.name]: { text: "Catherine Reed" }, [COL.fax]: faxValue("2125550123@rcfax.com") });
+  await edit(COL.fax);
+  assert.equal(writes.length, 0);
+});
+
+test("a doctor with an entry per office: a fax edit goes only to the office at the patient's clinic address", async () => {
+  directory = [
+    directoryEntry("530", "Alex Placeholder", { npi: "1000000030", address: "12 Oak St, Newark, NJ 07102", fax: "2125550130@rcfax.com" }),
+    directoryEntry("531", "Alex Placeholder", { npi: "1000000030", address: "400 Main Street Suite 2, Hoboken, NJ 07030", fax: "2125550131@rcfax.com" })
+  ];
+  sourceItem({
+    [COL.npi]: { text: "1000000030" }, [COL.name]: { text: "Alex Placeholder" },
+    [COL.address]: { text: "400 Main St, Hoboken, NJ 07030" }, [COL.fax]: faxValue("2125550199@rcfax.com")
+  });
+  await edit(COL.fax);
+  assert.deepEqual(writes.map((w) => [w.itemId, w.columnId]), [["531", "email_mkwh2ywd"]]);
+});
+
+test("a doctor with an entry per office: the clinic name decides when the address doesn't, and the edited column never does", async () => {
+  directory = [
+    directoryEntry("540", "Alex Placeholder", { npi: "1000000040", clinic: "North Office", fax: "2125550140@rcfax.com" }),
+    directoryEntry("541", "Alex Placeholder", { npi: "1000000040", clinic: "South Office", fax: "2125550141@rcfax.com" })
+  ];
+  // The patient's fax still equals entry 540's, but the fax is what was edited, so the clinic decides.
+  sourceItem({
+    [COL.npi]: { text: "1000000040" }, [COL.name]: { text: "Alex Placeholder" },
+    [COL.clinic]: { text: "south office" }, [COL.fax]: faxValue("2125550140@rcfax.com")
+  });
+  await edit(COL.fax);
+  assert.deepEqual(writes.map((w) => w.itemId), ["541"]);
+});
+
+test("a doctor with an entry per office: nothing is written when the patient's details can't tell the offices apart", async () => {
+  directory = [
+    directoryEntry("550", "Alex Placeholder", { npi: "1000000050", address: "12 Oak St, Newark, NJ 07102" }),
+    directoryEntry("551", "Alex Placeholder", { npi: "1000000050", address: "12 Oak St, Newark, NJ 07102" })
+  ];
+  sourceItem({
+    [COL.npi]: { text: "1000000050" }, [COL.name]: { text: "Alex Placeholder" },
+    [COL.address]: { text: "12 Oak Street, Newark, NJ 07102" }, [COL.fax]: faxValue("2125550150@rcfax.com")
+  });
+  await edit(COL.fax);
+  sourceItem({ [COL.npi]: { text: "1000000050" }, [COL.name]: { text: "Alex Placeholder" }, [COL.fax]: faxValue("2125550150@rcfax.com") });
+  await edit(COL.fax);
+  assert.equal(writes.length, 0);
+});
+
+test("of several entries under an NPI, only the ones with the patient's doctor name are considered", async () => {
+  directory = [
+    directoryEntry("560", "Jordan Example", { npi: "1000000060", address: "12 Oak St, Newark, NJ 07102" }),
+    directoryEntry("561", "Alex Placeholder", { npi: "1000000060", address: "99 Elm St, Newark, NJ 07102" })
+  ];
+  sourceItem({
+    [COL.npi]: { text: "1000000060" }, [COL.name]: { text: "Alex Placeholder" },
+    [COL.address]: { text: "12 Oak St, Newark, NJ 07102" }, [COL.fax]: faxValue("2125550160@rcfax.com")
+  });
+  await edit(COL.fax);
+  assert.deepEqual(writes.map((w) => w.itemId), ["561"]);
 });

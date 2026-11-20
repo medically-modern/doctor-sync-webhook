@@ -6,9 +6,13 @@ then syncs the changed field to the MM Doctor Database.
 ## Flow
 1. User edits doctor info on any pipeline board (Profile Send Off, Medical Evaluation, Insurance, Welcome Call)
 2. Monday webhook fires to this service
-3. Service looks up doctor in DB by NPI
-4. If NPI matches AND name matches → updates the changed column in Doctor Database
-5. If NPI matches but name doesn't → logs mismatch, does NOT update
+3. Service looks up every Doctor Database entry with that NPI (a doctor has one entry per office)
+4. Keeps the entries whose name matches. Credentials and suffixes (MD, PA-C, FNP-BC, Jr), a leading Dr.,
+   "Last, First", a middle name or initial, and a space inside a surname don't count as a difference.
+   None match → logs `[NAME MISMATCH]`, does NOT update
+5. Several entries left → picks the office this patient is seen at by their clinic address, then clinic
+   name, fax, phone (never the column being edited). Still can't tell → logs `[AMBIGUOUS]`, does NOT update
+6. Updates the changed column on that one entry
 
 ## Environment Variables
 - `MONDAY_API_TOKEN` — Monday.com API token (required)

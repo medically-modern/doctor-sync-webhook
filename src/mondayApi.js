@@ -94,6 +94,23 @@ async function findDoctorByNPI(npi) {
   return items.length > 0 ? items[0] : null;
 }
 
+/**
+ * Every Doctor Database entry with this NPI. A doctor seen at several offices
+ * has one entry per office under the same NPI, so the caller picks the right
+ * one (webhookHandler.pickLocation) instead of taking whichever comes first.
+ */
+async function findDoctorsByNPI(npi) {
+  const data = await mondayQuery(
+    `query ($boardId: ID!, $columns: [ItemsPageByColumnValuesQuery!]!) {
+      items_page_by_column_values(board_id: $boardId, limit: 50, columns: $columns) {
+        items { id name column_values { id type text value } }
+      }
+    }`,
+    { boardId: "18142847597", columns: [{ column_id: "text_mkwhtqjb", column_values: [String(npi)] }] }
+  );
+  return data.items_page_by_column_values?.items || [];
+}
+
 
 /**
  * Search the Doctor Database board for doctors by name (exact match).
@@ -181,6 +198,7 @@ module.exports = {
   mondayQuery,
   getItemColumns,
   findDoctorByNPI,
+  findDoctorsByNPI,
   findDoctorsByName,
   updateDoctorColumn,
   updateDoctorName,

@@ -1,6 +1,6 @@
 const {
   getItemColumns,
-  findDoctorByNPI,
+  findDoctorsByNPI,
   findDoctorsByName,
   updateDoctorColumn,
   updateDoctorName,
@@ -133,24 +133,34 @@ async function handleWebhook(body) {
 
   console.log(`[LOOKUP] NPI=${npi} DoctorName="${sourceDoctorName}"`);
 
-  // 4. Find the doctor in the database by NPI
-  const dbDoctor = await findDoctorByNPI(npi);
+  // 4. Every Doctor Database entry with this NPI (one per office the doctor works at)
+  const byNpi = await findDoctorsByNPI(npi);
 
-  if (!dbDoctor) {
+  if (byNpi.length === 0) {
     console.log(`[NOT FOUND] No doctor in DB with NPI=${npi} (source name: "${sourceDoctorName}")`);
     return;
   }
 
-  console.log(`[FOUND] DB Doctor: "${dbDoctor.name}" (id: ${dbDoctor.id})`);
-
-  // 5. Safety check: NPI matched, but does the name match?
-  const dbDoctorName = dbDoctor.name?.trim() || "";
-  if (!namesMatch(sourceDoctorName, dbDoctorName)) {
+  // 5. Safety check: NPI matched, but does the name match? Credentials
+  //    ("Allyson Quinn, PA-C" vs "Allyson Quinn") don't count as a difference.
+  const named = byNpi.filter((d) => namesMatch(sourceDoctorName, d.name));
+  if (named.length === 0) {
     console.warn(
-      `[NAME MISMATCH] NPI=${npi} matched DB doctor "${dbDoctorName}" but source has "${sourceDoctorName}" — SKIPPING UPDATE`
+      `[NAME MISMATCH] NPI=${npi} matched DB doctor "${byNpi[0].name?.trim() || ""}" but source has "${sourceDoctorName}" — SKIPPING UPDATE`
     );
     return;
   }
+
+  // 5b. Several entries (offices) under this NPI: write only to the one this
+  //     patient is seen at, never the first Monday happens to return.
+  const picked = pickLocation(named, sourceItem, columnId);
+  if (!picked.entry) {
+    console.warn(`[AMBIGUOUS] NPI=${npi} has ${named.length} DB entries for "${sourceDoctorName}" and ${picked.why} — SKIPPING UPDATE`);
+    return;
+  }
+  const dbDoctor = picked.entry;
+  console.log(`[FOUND] DB Doctor: "${dbDoctor.name}" (id: ${dbDoctor.id})${named.length > 1 ? ` — ${picked.why}` : ""}`);
+  const dbDoctorName = dbDoctor.name?.trim() || "";
 
   // 6. Map the changed column to the DB column and update
   const mapping = mapSourceToDb(columnId);
@@ -279,26 +289,93 @@ function extractPhoneDigits(phoneStr) {
 }
 
 /**
- * Compare doctor names. Exact match after normalization:
- * - case-insensitive
- * - trim whitespace
- * - collapse multiple spaces
- * - strip common prefixes like "Dr.", "DR."
+ * Compare doctor names after normalization: case, spacing, a leading "Dr.",
+ * trailing credentials and suffixes (MD, DO, NP, PA-C, FNP-BC, Jr ...), and
+ * "Last, First". Credentials stop only while two name tokens remain, so
+ * "Anh Do, MD" is "anh do", not "anh". The same rule as
+ * josh-monday-automations' prescriber-requirements sync.
  */
-function namesMatch(name1, name2) {
-  const normalize = (n) =>
-    (n || "")
-      .trim()
-      .toLowerCase()
-      .replace(/^dr\.?\s*/i, "")
-      .replace(/\s+/g, " ");
-
-  const n1 = normalize(name1);
-  const n2 = normalize(name2);
-
-  if (!n1 || !n2) return false;
-
-  return n1 === n2;
+function normalizeName(name) {
+  let n = String(name || "").toLowerCase().trim().replace(/\./g, "").replace(/\s+/g, " ");
+  n = n.replace(/^dr\s+/, "");
+  const CREDS = /(?:\s|,)+(?:md|do|np|pa|pa-c|dnp|aprn|fnp|fnp-c|fnp-bc|crnp|cnp|rn|msn|cde|cdces|mbbs|phd|facp|face|jr|sr|ii|iii|iv)\s*$/;
+  for (;;) {
+    const stripped = n.replace(CREDS, "").trim();
+    if (stripped === n || stripped.split(/\s+/).filter(Boolean).length < 2) break;
+    n = stripped;
+  }
+  n = n.replace(/,\s*$/, "");
+  if (n.includes(",")) {
+    const parts = n.split(",").map((p) => p.trim()).filter(Boolean);
+    if (parts.length === 2) n = `${parts[1]} ${parts[0]}`;
+  }
+  return n.replace(/\s+/g, " ").trim();
 }
 
-module.exports = { handleWebhook };
+/**
+ * The NPI already matched, so the name only guards against a wrong NPI: the
+ * same first and last name is enough. A middle name or initial ("Cara Lynn
+ * Cahill", "Katherine A. Beckwith") and a space inside a surname ("De Rosairo")
+ * don't make two different people.
+ */
+function namesMatch(name1, name2) {
+  const n1 = normalizeName(name1);
+  const n2 = normalizeName(name2);
+  if (!n1 || !n2) return false;
+  if (n1 === n2 || n1.replace(/\s/g, "") === n2.replace(/\s/g, "")) return true;
+  const t1 = n1.split(" "), t2 = n2.split(" ");
+  if (t1.length < 2 || t2.length < 2) return false;
+  return t1[0] === t2[0] && t1[t1.length - 1] === t2[t2.length - 1];
+}
+
+/** "1150 Saint Nicholas Ave Fl 2, New York, NY 10032" -> { street: "1150 saint", zip: "10032" } */
+function addressKey(text) {
+  const t = String(text || "").toLowerCase();
+  const m = t.match(/(\d+[a-z]?)\s+([a-z0-9]+)/);
+  if (!m) return null;
+  const zip = (t.match(/\b(\d{5})(?:-\d{4})?\s*$/) || [])[1] || "";
+  return { street: `${m[1]} ${m[2]}`, zip };
+}
+function sameAddress(a, b) {
+  const x = addressKey(a), y = addressKey(b);
+  if (!x || !y || x.street !== y.street) return false;
+  return !x.zip || !y.zip || x.zip === y.zip;
+}
+const digitsOf = (t) => extractPhoneDigits(String(t || "").split("@")[0]);
+const sameText = (a, b) => Boolean(a && b) && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Which of a doctor's entries (one per office) this patient's edit belongs to.
+ * One entry: that one. Several: narrow by the patient's other doctor fields,
+ * in order clinic address, clinic name, fax, phone — skipping the column being
+ * edited, whose new value the entry doesn't hold yet. A field that rules out
+ * every entry is ignored (the entry may simply be blank there); one that
+ * leaves a single entry decides. Still several, or none told apart: no entry,
+ * and nothing is written.
+ */
+function pickLocation(entries, sourceItem, changedColumnId) {
+  if (entries.length === 1) return { entry: entries[0], why: "only entry" };
+  const src = (id) => sourceItem.column_values.find((cv) => cv.id === id)?.text?.trim() || "";
+  const db = (e, id) => e.column_values.find((cv) => cv.id === id)?.text?.trim() || "";
+  const keys = [
+    { label: "clinic address", source: "location_mm1xjnfv", dbCol: "text_mkzc21ns", same: sameAddress },
+    { label: "clinic name", source: "dropdown_mm1xbvas", dbCol: "dropdown_mm1vd9fs", same: sameText },
+    { label: "fax", source: "email_mm1xdzcj", dbCol: "email_mkwh2ywd", same: (a, b) => Boolean(digitsOf(a)) && digitsOf(a) === digitsOf(b) },
+    { label: "phone", source: "phone_mm1xz8c0", dbCol: "phone", same: (a, b) => Boolean(digitsOf(a)) && digitsOf(a) === digitsOf(b) },
+  ];
+  let left = entries;
+  const used = [];
+  for (const k of keys) {
+    if (k.source === changedColumnId) continue;
+    const value = src(k.source);
+    if (!value) continue;
+    const hit = left.filter((e) => k.same(value, db(e, k.dbCol)));
+    if (hit.length === 0) continue;
+    left = hit;
+    used.push(k.label);
+    if (left.length === 1) return { entry: left[0], why: `matched on ${used.join(" + ")}` };
+  }
+  return { entry: null, why: used.length ? `${left.length} still match on ${used.join(" + ")}` : "none matches the patient's clinic address, clinic, fax or phone" };
+}
+
+module.exports = { handleWebhook, namesMatch, pickLocation };
