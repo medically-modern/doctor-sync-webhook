@@ -15,6 +15,8 @@ if [ -z "$MONDAY_API_TOKEN" ]; then
 fi
 
 WEBHOOK_URL="${RAILWAY_URL}/webhook"
+# Monday's API address: MONDAY_API_URL when set (Friday's /v2 after the January cutover), else Monday's own.
+MONDAY_API_URL="${MONDAY_API_URL:-https://api.monday.com/v2}"
 BOARDS=("18406352652" "18406060017" "18410601299" "18410804557")
 BOARD_NAMES=("Profile Send Off" "Medical Evaluation" "Insurance" "Welcome Call")
 
@@ -27,7 +29,7 @@ for i in "${!BOARDS[@]}"; do
 
   echo "--- ${BOARD_NAME} (${BOARD_ID}) ---"
 
-  RESULT=$(curl -s -X POST https://api.monday.com/v2 \
+  RESULT=$(curl -s -X POST "${MONDAY_API_URL}" \
     -H "Authorization: ${MONDAY_API_TOKEN}" \
     -H "Content-Type: application/json" \
     -d "{
@@ -39,4 +41,4 @@ for i in "${!BOARDS[@]}"; do
 done
 
 echo "Done! Webhooks registered for all 4 boards."
-echo "Verify at: https://api.monday.com/v2 with query: { webhooks(board_id: <id>) { id event config } }"
+echo "Verify at: ${MONDAY_API_URL} with query: { webhooks(board_id: <id>) { id event config } }"

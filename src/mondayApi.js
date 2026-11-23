@@ -1,4 +1,5 @@
-const MONDAY_API_URL = "https://api.monday.com/v2";
+// Monday's API address. A setting so the January cutover can point it at Friday (/v2); unset, it is Monday.
+const MONDAY_API_URL = process.env.MONDAY_API_URL || "https://api.monday.com/v2";
 const MONDAY_TOKEN = process.env.MONDAY_API_TOKEN;
 const { createFridayForward } = require("./fridayForward");
 
