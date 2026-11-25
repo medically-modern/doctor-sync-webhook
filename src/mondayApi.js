@@ -9,6 +9,13 @@ const { createFridayForward } = require("./fridayForward");
 // unless FRIDAY_FORWARD=1 (with FRIDAY_URL and FRIDAY_API_KEY); FRIDAY_BOARD_IDS names the boards.
 const fridayForward = createFridayForward({ env: process.env, log: console.log, service: "doctor-sync-webhook" });
 
+// The Friday read shadow (fridayShadow.js): every read Monday answers through mondayQuery is handed, with
+// Monday's answer, to Friday's /v2/shadow, which runs the same read on Friday and keeps how the two compare
+// (counts and paths, never a value). After the answer, never awaited, never throws, never a mutation. Off
+// unless FRIDAY_SHADOW=1 (with FRIDAY_URL and FRIDAY_API_KEY, or FRIDAY_SHADOW_URL / FRIDAY_SHADOW_KEY).
+const { createFridayShadow } = require("./fridayShadow");
+const fridayShadow = createFridayShadow({ env: process.env, log: console.log, reader: "doctor-sync-webhook" });
+
 if (!MONDAY_TOKEN) {
   console.warn("[WARN] MONDAY_API_TOKEN not set — API calls will fail");
 }
@@ -17,6 +24,7 @@ if (!MONDAY_TOKEN) {
  * Execute a Monday.com GraphQL query
  */
 async function mondayQuery(query, variables = {}) {
+  const started = Date.now();
   const res = await fetch(MONDAY_API_URL, {
     method: "POST",
     headers: {
@@ -34,6 +42,10 @@ async function mondayQuery(query, variables = {}) {
   }
 
   if (res.ok && data.data) fridayForward.onMutation({ query, variables, data: data.data });   // Monday said yes: Friday hears the same write
+  // A read Monday answered: Friday runs it too (never awaited, never a mutation).
+  if (res.ok && data.data && typeof data.data === "object" && !/^\s*mutation\b/i.test(String(query))) {
+    fridayShadow.onRead({ query, variables, status: res.status, json: data, ms: Date.now() - started });
+  }
   return data.data;
 }
 
@@ -196,6 +208,7 @@ async function updateDoctorName(itemId, newName) {
 
 module.exports = {
   fridayForward,
+  fridayShadow,
   mondayQuery,
   getItemColumns,
   findDoctorByNPI,

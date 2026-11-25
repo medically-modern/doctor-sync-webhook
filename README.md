@@ -19,6 +19,7 @@ then syncs the changed field to the MM Doctor Database.
 - `PORT` — Server port (auto-set by Railway)
 - `FRIDAY_FORWARD`, `FRIDAY_URL`, `FRIDAY_API_KEY`, `FRIDAY_BOARD_IDS` — the Friday forward (below); off unless `FRIDAY_FORWARD=1`
 - `NTFY_URL`, `NTFY_TOPIC` — optional: where the forward pushes an alert when it gives up on a write
+- `FRIDAY_SHADOW` — the Friday read shadow (below); off unless `1`. Uses `FRIDAY_URL` / `FRIDAY_API_KEY` (or `FRIDAY_SHADOW_URL` / `FRIDAY_SHADOW_KEY`)
 
 ## The Friday forward
 Friday (Medically Modern's own board app, `medically-modern/friday`) keeps a copy of the MM Doctor Database
@@ -29,6 +30,13 @@ accepted (no `errors`, data in the answer), after Monday's answer, and it posts 
 a restart loses what was queued (Friday's hourly check and sync from Monday are the net). Only a write naming a board
 in `FRIDAY_BOARD_IDS` is sent (`18142847597`). `GET /` shows it under `friday`. Keep `mondayQuery` the only Monday
 call: `test/fridayForward.test.js` fails on another.
+
+## The Friday read shadow (2026-11-25)
+Every read Monday answers through `mondayQuery` is handed with Monday's answer to Friday's `POST /v2/shadow`
+(`src/fridayShadow.js`, the same module every reader of Monday carries; reader `doctor-sync-webhook`), which runs the
+same read on Friday and keeps how the two answers compare (counts and paths, never a value). After the answer, never
+awaited, never retried, never a mutation or a read Monday refused. Off unless `FRIDAY_SHADOW=1`. `GET /` shows it
+under `friday_shadow`; `test/fridayShadowWiring.test.js` pins the wiring.
 
 ## Deploy to Railway
 1. Connect this repo to Railway
